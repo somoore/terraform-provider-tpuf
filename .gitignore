@@ -1,0 +1,63 @@
+# Internal design notes — never commit
+CLAUDE.md
+
+# Go build artifacts
+terraform-provider-tpuf
+terraform-provider-tpuf.exe
+dist/
+*.exe
+*.dll
+*.test
+*.out
+
+# Go coverage
+coverage.out
+coverage.html
+*.coverprofile
+profile.cov
+
+# Dependencies
+vendor/
+
+# Environment / credentials — never commit
+.env
+.env.*
+*.env
+.envrc
+.direnv/
+*.pem
+*.p12
+credentials.json
+
+# Terraform
+**/.terraform/*
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+*.tfplan
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
