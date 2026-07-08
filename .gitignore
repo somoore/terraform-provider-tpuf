@@ -1,3 +1,6 @@
+# Internal design notes — never commit
+CLAUDE.md
+
 # Go build artifacts
 terraform-provider-tpuf
 terraform-provider-tpuf.exe
