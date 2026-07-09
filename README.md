@@ -47,13 +47,71 @@ resource "tpuf_namespace" "docs" {
 
 Document upserts and queries are data-plane operations that belong in application code — they are intentionally out of scope.
 
+## Installing
+
+Signed release binaries for every OS/arch are published on the [GitHub releases page](https://github.com/somoore/terraform-provider-tpuf/releases). Each release includes a `SHA256SUMS` checksum file and a `SHA256SUMS.sig` GPG signature.
+
+> This provider is **not currently on the Terraform Registry**, so `terraform init` won't fetch `somoore/tpuf` automatically. Install it from a release using one of the methods below. (If it is published later, the `required_providers` block in [Quick start](#quick-start) works as-is.)
+
+### 1. Verify the release (recommended)
+
+Download the release assets, then verify the archive checksums, and — if you have the signing key — the signature:
+
+```sh
+VERSION=0.1.0
+OS=$(uname -s | tr A-Z a-z)
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')   # normalize to Terraform's arch names
+ZIP="terraform-provider-tpuf_${VERSION}_${OS}_${ARCH}.zip"
+BASE="https://github.com/somoore/terraform-provider-tpuf/releases/download/v${VERSION}"
+
+# Grab the archive for your platform plus the checksum files.
+curl -LO "${BASE}/${ZIP}"
+curl -LO "${BASE}/terraform-provider-tpuf_${VERSION}_SHA256SUMS"
+curl -LO "${BASE}/terraform-provider-tpuf_${VERSION}_SHA256SUMS.sig"
+
+# Check the archive's SHA256 matches the published sum (prints "OK").
+shasum -a 256 --ignore-missing -c "terraform-provider-tpuf_${VERSION}_SHA256SUMS"
+
+# Optional: verify the checksum file itself is signed by the maintainer's key.
+# Import the public key first (see releases page), then:
+gpg --verify "terraform-provider-tpuf_${VERSION}_SHA256SUMS.sig" \
+             "terraform-provider-tpuf_${VERSION}_SHA256SUMS"
+```
+
+On Linux, `sha256sum -c --ignore-missing …` is the equivalent of the `shasum` line.
+
+### 2. Install via a filesystem mirror
+
+Unzip the verified archive into a [filesystem mirror](https://developer.hashicorp.com/terraform/cli/config/config-file#filesystem_mirror) laid out by the registry's expected path, then point Terraform at it:
+
+```sh
+# Layout: <mirror>/<hostname>/<namespace>/<type>/<version>/<os>_<arch>/
+DEST=~/.terraform.d/plugins/registry.terraform.io/somoore/tpuf/${VERSION}/${OS}_${ARCH}
+mkdir -p "$DEST"
+unzip -o "$ZIP" -d "$DEST"
+```
+
+```hcl
+# ~/.terraformrc
+provider_installation {
+  filesystem_mirror {
+    path    = "/Users/you/.terraform.d/plugins"
+    include = ["registry.terraform.io/somoore/tpuf"]
+  }
+  direct {}   # everything else still resolves from the registry
+}
+```
+
+`terraform init` will now resolve `somoore/tpuf` from the local mirror. (For iterating on the provider source instead, use the [dev override](#development) below.)
+
 ## Quick start
 
 ```hcl
 terraform {
   required_providers {
     tpuf = {
-      source = "somoore/tpuf"
+      source  = "somoore/tpuf"
+      version = "0.1.0"
     }
   }
 }
