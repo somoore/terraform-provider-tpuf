@@ -9,7 +9,10 @@ import (
 	"github.com/somoore/terraform-provider-tpuf/internal/provider"
 )
 
-var version string = "dev"
+var (
+	version string = "dev"
+	commit  string = "none" // set via -ldflags by goreleaser at release time
+)
 
 func main() {
 	var debug bool
