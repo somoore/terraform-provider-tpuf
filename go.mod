@@ -1,8 +1,6 @@
 module github.com/somoore/terraform-provider-tpuf
 
-go 1.26.3
-
-toolchain go1.26.5
+go 1.26.5
 
 require (
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
