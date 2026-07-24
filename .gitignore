@@ -17,6 +17,7 @@ profile.cov
 vendor/
 
 # Environment / credentials — never commit
+CLAUDE.md
 .env
 .env.*
 *.env
