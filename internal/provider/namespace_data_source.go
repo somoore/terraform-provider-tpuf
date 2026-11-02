@@ -98,7 +98,7 @@ func (d *NamespaceDataSource) Read(ctx context.Context, req datasource.ReadReque
 	ns := d.client.Namespace(data.Name.ValueString())
 	meta, err := ns.Metadata(ctx, tpuf.NamespaceMetadataParams{})
 	if err != nil {
-		resp.Diagnostics.AddError("Error reading namespace", err.Error())
+		resp.Diagnostics.AddError("Error reading namespace", errorDetail(err))
 		return
 	}
 

@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -214,8 +216,19 @@ func schemaObjectAttrType() types.ObjectType {
 // errNamespaceExists signals that Create found the namespace already present.
 var errNamespaceExists = errors.New("namespace already exists")
 
-// placeholderID is the throwaway document id used to instantiate a namespace.
-const placeholderID = "tf-provider-tpuf-placeholder"
+// placeholderIDPrefix prefixes the throwaway document id used to instantiate a
+// namespace. A fresh random suffix is generated per create so that concurrent
+// creators (or a pre-existing document that happens to use a former fixed id)
+// can never be deleted by another caller's placeholder cleanup.
+const placeholderIDPrefix = "tf-provider-tpuf-placeholder-"
+
+func newPlaceholderID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("generating placeholder document id: %w", err)
+	}
+	return placeholderIDPrefix + hex.EncodeToString(b[:]), nil
+}
 
 // createEmptyNamespace brings a namespace into existence with the given
 // schema and zero documents.
@@ -229,6 +242,13 @@ const placeholderID = "tf-provider-tpuf-placeholder"
 // delete it — the namespace persists empty with the schema intact. An
 // existence check runs first so Create never writes into existing data.
 //
+// The API has no create-if-absent operation, so this remains a check-then-act
+// sequence: two concurrent applies of the same new name can both observe 404
+// and both "succeed", leaving two states owning one namespace. Terraform state
+// locking prevents this within one workspace; concurrent applies of the same
+// namespace name are unsupported. The per-call placeholder id at least ensures
+// a racing caller's data is never deleted by this caller's cleanup.
+//
 // ponytail: placeholder id is a string, so Terraform-created namespaces get a
 // string id type; expose an id_type attribute if uint/uuid ids are needed.
 func createEmptyNamespace(ctx context.Context, ns tpuf.Namespace, schemaParam map[string]tpuf.AttributeSchemaConfigParam) error {
@@ -239,8 +259,13 @@ func createEmptyNamespace(ctx context.Context, ns tpuf.Namespace, schemaParam ma
 		return fmt.Errorf("checking for existing namespace: %w", err)
 	}
 
+	placeholder, err := newPlaceholderID()
+	if err != nil {
+		return err
+	}
+
 	writeParams := tpuf.NamespaceWriteParams{
-		UpsertRows: []tpuf.RowParam{{"id": placeholderID}},
+		UpsertRows: []tpuf.RowParam{{"id": placeholder}},
 	}
 	if schemaParam != nil {
 		writeParams.Schema = schemaParam
@@ -248,7 +273,7 @@ func createEmptyNamespace(ctx context.Context, ns tpuf.Namespace, schemaParam ma
 	if _, err := ns.Write(ctx, writeParams); err != nil {
 		return fmt.Errorf("creating namespace: %w", err)
 	}
-	if _, err := ns.Write(ctx, tpuf.NamespaceWriteParams{Deletes: []any{placeholderID}}); err != nil {
+	if _, err := ns.Write(ctx, tpuf.NamespaceWriteParams{Deletes: []any{placeholder}}); err != nil {
 		return fmt.Errorf("removing placeholder document from new namespace: %w", err)
 	}
 	return nil
@@ -276,7 +301,7 @@ func (r *NamespaceResource) Create(ctx context.Context, req resource.CreateReque
 				fmt.Sprintf("Namespace %q already exists. Use `terraform import` to manage it.", data.Name.ValueString()),
 			)
 		} else {
-			resp.Diagnostics.AddError("Error creating namespace", err.Error())
+			resp.Diagnostics.AddError("Error creating namespace", errorDetail(err))
 		}
 		return
 	}
@@ -288,7 +313,7 @@ func (r *NamespaceResource) Create(ctx context.Context, req resource.CreateReque
 			},
 		})
 		if err != nil {
-			resp.Diagnostics.AddError("Error setting namespace pinning", err.Error())
+			resp.Diagnostics.AddError("Error setting namespace pinning", errorDetail(err))
 			return
 		}
 	}
@@ -337,7 +362,7 @@ func (r *NamespaceResource) readInto(ctx context.Context, data *NamespaceResourc
 		if isNotFoundErr(err) {
 			return true, diags
 		}
-		diags.AddError("Error reading namespace", err.Error())
+		diags.AddError("Error reading namespace", errorDetail(err))
 		return false, diags
 	}
 
@@ -373,7 +398,7 @@ func (r *NamespaceResource) Update(ctx context.Context, req resource.UpdateReque
 			return
 		}
 		if _, err := ns.UpdateSchema(ctx, tpuf.NamespaceUpdateSchemaParams{Schema: schemaParam}); err != nil {
-			resp.Diagnostics.AddError("Error updating namespace schema", err.Error())
+			resp.Diagnostics.AddError("Error updating namespace schema", errorDetail(err))
 			return
 		}
 	}
@@ -387,7 +412,7 @@ func (r *NamespaceResource) Update(ctx context.Context, req resource.UpdateReque
 			NamespaceMetadataPatch: tpuf.NamespaceMetadataPatchParam{Pinning: pinning},
 		})
 		if err != nil {
-			resp.Diagnostics.AddError("Error updating namespace pinning", err.Error())
+			resp.Diagnostics.AddError("Error updating namespace pinning", errorDetail(err))
 			return
 		}
 	}
@@ -410,7 +435,7 @@ func (r *NamespaceResource) Delete(ctx context.Context, req resource.DeleteReque
 
 	ns := r.client.Namespace(data.Name.ValueString())
 	if _, err := ns.DeleteAll(ctx, tpuf.NamespaceDeleteAllParams{}); err != nil && !isNotFoundErr(err) {
-		resp.Diagnostics.AddError("Error deleting namespace", err.Error())
+		resp.Diagnostics.AddError("Error deleting namespace", errorDetail(err))
 	}
 }
 

@@ -44,20 +44,38 @@ fi
 
 #### 2. No secrets committed ###################################################
 say "secret scan"
+# gitleaks is pattern-based, so it catches unverified secrets (rotated, revoked,
+# non-API credentials) that a verification-only scan misses. It is the blocking
+# gate whenever it is installed; --redact keeps any hit out of the logs.
+if command -v gitleaks >/dev/null 2>&1; then
+  if gitleaks detect --source . --no-git --redact --no-banner >/dev/null 2>&1; then
+    ok "gitleaks: no leaks in the working tree"
+  else
+    bad "gitleaks found secret(s) — run: gitleaks detect --source . --no-git --redact"
+  fi
+fi
 if command -v trufflehog >/dev/null 2>&1; then
-  if trufflehog filesystem . --no-update --only-verified --fail >/dev/null 2>&1; then
-    ok "trufflehog: no verified secrets"
+  if command -v gitleaks >/dev/null 2>&1; then
+    # Second opinion only: --only-verified is fine as an extra signal, but it
+    # must never be the sole gate.
+    if trufflehog filesystem . --no-update --only-verified --fail >/dev/null 2>&1; then
+      ok "trufflehog: no verified secrets"
+    else
+      bad "trufflehog found verified secret(s) — run: trufflehog filesystem . --only-verified"
+    fi
   else
-    bad "trufflehog found verified secret(s) — run: trufflehog filesystem . --only-verified"
+    # trufflehog is the only scanner available, so run it unverified and only
+    # over files that can actually be committed (ignored build output is
+    # unreadable noise and a false-negative source).
+    if git ls-files -co --exclude-standard -z | xargs -0 trufflehog filesystem --no-update --no-verification --fail >/dev/null 2>&1; then
+      ok "trufflehog: no secrets (unverified scan of committable files)"
+    else
+      bad "trufflehog found secret(s) — run: git ls-files -co --exclude-standard -z | xargs -0 trufflehog filesystem --no-verification"
+    fi
   fi
-elif command -v gitleaks >/dev/null 2>&1; then
-  if gitleaks detect --source . --no-git --no-banner >/dev/null 2>&1; then
-    ok "gitleaks: no leaks"
-  else
-    bad "gitleaks found secret(s) — run: gitleaks detect --source ."
-  fi
-else
-  warn "neither trufflehog nor gitleaks installed — skipping secret scan (brew install trufflehog)"
+fi
+if ! command -v gitleaks >/dev/null 2>&1 && ! command -v trufflehog >/dev/null 2>&1; then
+  warn "neither trufflehog nor gitleaks installed — skipping secret scan (brew install gitleaks)"
 fi
 
 #### 3. No .env / credential files #############################################
@@ -73,9 +91,11 @@ else
   ok "no .env / key / credential / tfstate files"
 fi
 # Belt and suspenders: reject the turbopuffer key pattern anywhere in tracked text.
-if git grep -nI 'tpuf_[A-Za-z0-9]\{20,\}' -- . >/dev/null 2>&1; then
-  bad "a turbopuffer API key (tpuf_...) appears in the tree:"
-  git grep -nI 'tpuf_[A-Za-z0-9]\{20,\}' -- . | sed 's/^/    /'
+# Print file:line only. Never echo the matched value: the scanner would become a
+# second leak into terminal scrollback and CI logs.
+if key_hits=$(git grep -nI -e 'tpuf_[A-Za-z0-9]\{20,\}' -- . 2>/dev/null); then
+  bad "a turbopuffer API key (tpuf_...) appears in the tree (value redacted):"
+  printf '%s\n' "$key_hits" | awk -F: '{print "    " $1 ":" $2}'
 fi
 
 #### 4. Duplicative code (advisory) ############################################

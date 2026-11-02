@@ -26,10 +26,12 @@ import (
 
 // mockTpuf simulates the turbopuffer API's namespace-creation semantics.
 type mockTpuf struct {
-	exists   bool     // namespace pre-exists
-	requests []string // "METHOD path" log
-	upserted []string // ids currently in the namespace
-	schema   map[string]any
+	exists     bool     // namespace pre-exists
+	requests   []string // "METHOD path" log
+	upserted   []string // ids currently in the namespace
+	writtenIDs []string // ids seen in upsert_rows, in order
+	deletedIDs []string // ids seen in deletes, in order
+	schema     map[string]any
 }
 
 func (m *mockTpuf) handler(t *testing.T) http.HandlerFunc {
@@ -72,11 +74,13 @@ func (m *mockTpuf) handler(t *testing.T) http.HandlerFunc {
 
 			for _, row := range body.UpsertRows {
 				id, _ := row["id"].(string)
+				m.writtenIDs = append(m.writtenIDs, id)
 				m.upserted = append(m.upserted, id)
 				m.exists = true
 			}
 			for _, d := range body.Deletes {
 				id, _ := d.(string)
+				m.deletedIDs = append(m.deletedIDs, id)
 				for i, u := range m.upserted {
 					if u == id {
 						m.upserted = append(m.upserted[:i], m.upserted[i+1:]...)
@@ -178,5 +182,69 @@ func TestCreateEmptyNamespace_noopDeleteDoesNotCreate(t *testing.T) {
 	// And an empty write is rejected outright.
 	if _, err := ns.Write(context.Background(), tpuf.NamespaceWriteParams{}); err == nil {
 		t.Fatal("empty write should be rejected with 400")
+	}
+}
+
+// legacyPlaceholderID is the fixed id used before placeholders became unique
+// per create. It is only referenced to prove the old behaviour is gone.
+const legacyPlaceholderID = "tf-provider-tpuf-placeholder"
+
+// TestCreateEmptyNamespace_uniquePlaceholderPerCreate pins the TOCTOU
+// hardening: each create must upsert and delete its own random placeholder id,
+// never a value shared with another creator.
+func TestCreateEmptyNamespace_uniquePlaceholderPerCreate(t *testing.T) {
+	ctx := context.Background()
+	seen := make(map[string]bool, 2)
+
+	for i := 0; i < 2; i++ {
+		m := &mockTpuf{}
+		client := newMockClient(t, m)
+
+		if err := createEmptyNamespace(ctx, client.Namespace("tf-test"), nil); err != nil {
+			t.Fatalf("create %d failed: %v", i, err)
+		}
+		if len(m.writtenIDs) != 1 {
+			t.Fatalf("create %d wrote %d rows, want 1: %v", i, len(m.writtenIDs), m.writtenIDs)
+		}
+		id := m.writtenIDs[0]
+		if !strings.HasPrefix(id, placeholderIDPrefix) || len(id) != len(placeholderIDPrefix)+32 {
+			t.Errorf("placeholder id %q does not have the expected %q + 32 hex shape", id, placeholderIDPrefix)
+		}
+		if len(m.deletedIDs) != 1 || m.deletedIDs[0] != id {
+			t.Errorf("create %d deleted %v, want exactly its own placeholder %q", i, m.deletedIDs, id)
+		}
+		seen[id] = true
+	}
+
+	if len(seen) != 2 {
+		t.Errorf("placeholder ids are not unique across creates: %v", seen)
+	}
+}
+
+// TestCreateEmptyNamespace_neverDeletesPreExistingPlaceholderRow models the
+// concurrent-create window: another caller created the namespace (and its own
+// placeholder row) between our 404 check and our writes. Cleanup must not
+// delete anything but the id this caller generated.
+func TestCreateEmptyNamespace_neverDeletesPreExistingPlaceholderRow(t *testing.T) {
+	m := &mockTpuf{upserted: []string{legacyPlaceholderID}}
+	client := newMockClient(t, m)
+
+	if err := createEmptyNamespace(context.Background(), client.Namespace("tf-test"), nil); err != nil {
+		t.Fatalf("createEmptyNamespace failed: %v", err)
+	}
+
+	for _, id := range m.deletedIDs {
+		if id == legacyPlaceholderID {
+			t.Fatalf("deleted the pre-existing placeholder row %q (deletes: %v)", legacyPlaceholderID, m.deletedIDs)
+		}
+	}
+	found := false
+	for _, id := range m.upserted {
+		if id == legacyPlaceholderID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("pre-existing placeholder row was removed: %v", m.upserted)
 	}
 }
