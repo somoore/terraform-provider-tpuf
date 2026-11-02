@@ -77,7 +77,7 @@ func (d *NamespacesDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		names = append(names, types.StringValue(iter.Current().ID))
 	}
 	if err := iter.Err(); err != nil {
-		resp.Diagnostics.AddError("Error listing namespaces", err.Error())
+		resp.Diagnostics.AddError("Error listing namespaces", errorDetail(err))
 		return
 	}
 

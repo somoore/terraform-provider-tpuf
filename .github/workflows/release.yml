@@ -30,6 +30,11 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
+      # Defense in depth: a tag can point at any commit. This does not stop a
+      # malicious maintainer (they can tag passing malicious code) — protect the
+      # v* tag ruleset and require an environment reviewer in GitHub settings.
+      - name: Run tests
+        run: go test ./...
       - name: Import GPG key
         uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
         id: import_gpg

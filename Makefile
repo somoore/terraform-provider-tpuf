@@ -28,8 +28,10 @@ testacc:
 
 # Regenerate docs/ from schema descriptions + examples/.
 # NOTE: tfplugindocs wipes docs/ of anything it didn't render.
+# Pinned on purpose: `make docs` executes downloaded code. Verified to
+# reproduce the committed docs with zero diff at this version.
 docs:
-	go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest generate --provider-name tpuf
+	go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@v0.25.0 generate --provider-name tpuf
 
 # Point git at the versioned hooks dir so pre-commit AND pre-push run
 # automatically. One setting, tracked in the repo, survives fresh clones
